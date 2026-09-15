@@ -5,6 +5,7 @@
     python -m md_hospital_prices inspect <file>      header + layout, no parsing
     python -m md_hospital_prices profile             row counts per file via DuckDB
     python -m md_hospital_prices parse               data/raw/ -> data/interim/*.parquet
+    python -m md_hospital_prices report              one line per parsed hospital
     python -m md_hospital_prices sample              small committable CSV slice
 """
 
@@ -12,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+
+sys.stdout.reconfigure(line_buffering=True)
 from pathlib import Path
 
 from .fetch import discover_all, fetch_all
@@ -160,12 +163,17 @@ def cmd_parse(args) -> int:
                     leftovers.append(row.payer_name)
                 yield clean
 
+        # write to a .part and rename on success, so an interrupted run never
+        # leaves a half-written parquet that the next run mistakes for done
+        part = dest.with_name(dest.name + ".part")
         try:
-            grand += write_parquet(rows(), dest)
+            grand += write_parquet(rows(), part)
+            part.replace(dest)
         except Exception as exc:  # one bad file must not kill the run
             print(f"    FAILED: {type(exc).__name__}: {exc}")
-            if dest.exists():
-                dest.unlink()
+        finally:
+            if part.exists():
+                part.unlink()
 
     print(f"\n{grand:,} tidy rows across {len(files)} files -> {INTERIM}")
 
@@ -174,6 +182,44 @@ def cmd_parse(args) -> int:
         print("\nPayer names no rule matched (add rules in normalise.py as needed):")
         for name, n in tail[:25]:
             print(f"    {n:>9,}  {name}")
+    return 0
+
+
+def cmd_report(args) -> int:
+    """One line per hospital from the parsed parquet: what we have, how fresh,
+    how many payers. The first thing to look at after `parse`."""
+    try:
+        import duckdb
+    except ImportError:
+        print("pip install duckdb")
+        return 1
+    files = sorted(INTERIM.glob("*.parquet"))
+    if not files:
+        print(f"No parquet in {INTERIM}. Run `parse` first.")
+        return 1
+    con = duckdb.connect()
+    glob = str(INTERIM / "*.parquet").replace("\\", "/")
+    sql = f"""
+      select hospital_name,
+             any_value(last_updated_on)                                   as updated,
+             count(*)                                                      as rows,
+             count(distinct code || '|' || code_type)                      as codes,
+             count(distinct payer_name)                                    as payers,
+             count(distinct plan_name)                                     as plans,
+             sum(case when rate_type='negotiated' then 1 else 0 end)       as negotiated,
+             sum(case when rate_type='estimated'  then 1 else 0 end)       as estimated,
+             round(median(case when rate_type='gross' then rate_dollar end), 2) as median_gross
+      from read_parquet('{glob}')
+      group by 1 order by 1
+    """
+    rows = con.execute(sql).fetchall()
+    hdr = ("hospital", "updated", "rows", "codes", "payers", "plans", "negotiated", "estimated", "median_gross")
+    print(f"{hdr[0]:<48} {hdr[1]:>10} {hdr[2]:>10} {hdr[3]:>7} {hdr[4]:>6} {hdr[5]:>5} {hdr[6]:>10} {hdr[7]:>9} {hdr[8]:>12}")
+    for r in rows:
+        name = (r[0] or "")[:48]
+        print(f"{name:<48} {str(r[1] or ''):>10} {r[2]:>10,} {r[3]:>7,} {r[4]:>6} {r[5]:>5} {r[6]:>10,} {r[7]:>9,} {str(r[8]):>12}")
+    tot = con.execute(f"select count(*) from read_parquet('{glob}')").fetchone()[0]
+    print(f"\n{len(rows)} hospitals, {tot:,} tidy rows. Query them with duckdb: select * from '{glob}' limit 10")
     return 0
 
 
@@ -218,6 +264,9 @@ def main(argv=None) -> int:
     pa_.add_argument("--force", action="store_true")
     pa_.add_argument("--only", help="substring of file name to limit the run")
     pa_.set_defaults(func=cmd_parse)
+
+    r = sub.add_parser("report", help="one line per parsed hospital")
+    r.set_defaults(func=cmd_report)
 
     s = sub.add_parser("sample", help="write a small committable CSV slice")
     s.add_argument("--per-hospital", type=int, default=2000)

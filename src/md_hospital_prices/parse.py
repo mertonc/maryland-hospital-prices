@@ -40,6 +40,7 @@ _ESTIMATED_SUFFIXES = {"estimated_amount"}
 # later rate_type of their own. Known and deliberately not parsed yet.
 _IGNORE_SUFFIXES = {"negotiated_algorithm", "additional_payer_notes",
                     "median_amount", "10th_percentile", "90th_percentile", "count"}
+_V3_STAT_PREFIXES = {"median_amount", "10th_percentile", "90th_percentile", "count"}
 
 # exactly nine digits at the start, then a separator. A ten-digit NPI
 # (Luminis) must NOT match, or we would file a fake EIN.
@@ -175,6 +176,12 @@ def decode_wide_header(header: list[str]) -> tuple[dict[str, int], list[PayerCol
             continue
 
         if head == "additional_payer_notes":
+            continue
+
+        # CMS v3.0.0 wide files carry per-payer allowed-amount statistics as
+        # median_amount|Payer|Plan, 10th_percentile|..., 90th_percentile|...,
+        # count|... (prefix form, seen on MedStar). Known; not parsed yet.
+        if head in _V3_STAT_PREFIXES:
             continue
 
         unknown.append(name)
