@@ -1,0 +1,33 @@
+# hospital machine-readable files — some run to gigabytes
+data/raw/
+data/interim/
+*.parquet
+*.json.gz
+*.zip
+
+# but keep the notes about where files came from
+!data/README.md
+!data/sources.csv
+
+# secrets
+.env
+*.pem
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# duckdb
+*.duckdb
+*.duckdb.wal
+
+# os and editors
+.DS_Store
+.vscode/
+.idea/
