@@ -1,0 +1,5 @@
+hospital_name,last_updated_on,version,hospital_location,hospital_address,license_number | MD
+Test Wide Hospital,2026-01-01,v2.0.0,Test Wide Hospital,1 Test Way Rockville MD 20850,99-9999
+description,code|1,code|1|type,code|2,code|2|type,setting,billing_class,standard_charge|gross,standard_charge|discounted_cash,standard_charge|min,standard_charge|max,standard_charge|Aetna|Choice POS II|negotiated_dollar,standard_charge|Aetna|Choice POS II|methodology,standard_charge|CareFirst|BluePreferred|negotiated_percentage,standard_charge|CareFirst|BluePreferred|methodology,standard_charge|UnitedHealthcare|Choice Plus|negotiated_dollar,standard_charge|UnitedHealthcare|Choice Plus|methodology,weird|thing|here
+Office visit level 3,99213,CPT,0510,RC,outpatient,professional,"$1,000.00",800.00,450.00,975.00,"$612.50",fee schedule,42.5,percent of total billed charges,,,junk
+Blank row that should be skipped,,,,,,,,,,,,,,,,,
