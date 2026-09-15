@@ -70,8 +70,8 @@ def test_metadata_row_is_read():
 
 def test_wide_file_row_count():
     rows = list(parse_file(WIDE))
-    # 2 codes x (4 hospital-wide rates + 2 payers that actually have a rate)
-    assert len(rows) == 12
+    # 2 codes x (4 hospital-wide + 2 negotiated + 1 estimated)
+    assert len(rows) == 14
 
 
 def test_payer_without_a_rate_is_not_emitted():
@@ -104,7 +104,8 @@ def test_one_row_is_exactly_one_price():
 
 def test_percent_rates_land_in_their_own_column():
     rows = list(parse_file(WIDE))
-    cf = [r for r in rows if r.payer_name == "CareFirst" and r.code == "99213"]
+    cf = [r for r in rows if r.payer_name == "CareFirst" and r.code == "99213"
+          and r.rate_type == "negotiated"]
     assert len(cf) == 1
     assert cf[0].rate_dollar is None
     assert cf[0].rate_percent == 42.5
@@ -122,7 +123,7 @@ def test_hospital_wide_rates_have_no_payer():
 def test_second_code_on_the_same_row_is_kept():
     rows = list(parse_file(WIDE))
     rc = [r for r in rows if r.code == "0510"]
-    assert len(rc) == 6
+    assert len(rc) == 7
     assert {r.code_type for r in rc} == {"RC"}
 
 
@@ -138,8 +139,8 @@ def test_tall_file_does_not_duplicate_hospital_wide_rates():
     # gross/cash/min/max repeat on all three payer rows but must be emitted once
     assert len([r for r in rows if r.rate_type == "gross"]) == 1
     assert len([r for r in rows if r.rate_type == "min"]) == 1
-    # 4 hospital-wide + 2 payers with a rate (United has neither)
-    assert len(rows) == 6
+    # 4 hospital-wide + 2 negotiated + 1 estimated (United has nothing)
+    assert len(rows) == 7
 
 
 def test_tall_and_wide_agree():
@@ -163,7 +164,7 @@ def test_csv_inside_zip_is_read_without_extracting():
     assert csv_member_of(ZIPPED) == "52-0738041_test-zipped_standardcharges.csv"
     assert csv_member_of(TALL) is None
     rows = list(parse_file(ZIPPED))
-    assert len(rows) == 6
+    assert len(rows) == 7
     assert rows[0].hospital_ein == "52-0738041"          # from the zip's name
     assert rows[0].source_file == ZIPPED.name
     assert rows[0].hospital_name == "Test Tall Hospital"  # from the CSV inside
@@ -173,3 +174,33 @@ def test_ten_digit_npi_is_not_mistaken_for_an_ein():
     assert ein_from_filename(Path("1477517225_annearundelmedicalcenter_standardcharges.csv")) is None
     assert ein_from_filename(Path("520738041-1669417838_holy-cross_standardcharges.zip")) == "52-0738041"
     assert ein_from_filename(Path("52-0607949-MeritusMedicalCenter-standardcharges-06102026.csv")) == "52-0607949"
+
+
+# --- lessons from the first two real files ------------------------------------
+
+def test_estimated_amount_is_its_own_rate_type():
+    """Frederick Health reports its all-payer rate only in estimated_amount."""
+    rows = list(parse_file(TALL))
+    est = [r for r in rows if r.rate_type == "estimated"]
+    assert len(est) == 1
+    assert est[0].payer_name == "CareFirst" and est[0].rate_dollar == 425.0
+    assert est[0].rate_percent is None
+
+
+def test_tall_dedupe_is_per_item_not_per_code(tmp_path: Path):
+    """Two chargemaster items on the same CPT with different gross charges
+    must both survive. Shady Grove has 15 items on 99213."""
+    src = (
+        "hospital_name,last_updated_on\nT,2026-01-01\n"
+        "description,code|1,code|1|type,modifiers,setting,payer_name,plan_name,"
+        "standard_charge|gross,standard_charge|negotiated_dollar\n"
+        "Item A,99213,CPT,,Both,P,Q,100.00,80.00\n"
+        "Item A,99213,CPT,,Both,P2,Q2,100.00,70.00\n"   # same item, second payer
+        "Item B,99213,CPT,25,Both,P,Q,150.00,120.00\n"  # different item, same CPT
+    )
+    f = tmp_path / "12-3456789_t_standardcharges.csv"
+    f.write_text(src)
+    rows = list(parse_file(f))
+    gross = [r for r in rows if r.rate_type == "gross"]
+    assert sorted(r.rate_dollar for r in gross) == [100.0, 150.0]
+    assert len([r for r in rows if r.rate_type == "negotiated"]) == 3

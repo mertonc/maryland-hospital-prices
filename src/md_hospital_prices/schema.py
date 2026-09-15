@@ -14,6 +14,10 @@ RATE_CASH = "discounted_cash"
 RATE_NEGOTIATED = "negotiated"
 RATE_MIN = "min"
 RATE_MAX = "max"
+# The hospital's own dollar estimate of what a payer will actually allow, used
+# when the contract is an algorithm/percentage. Frederick Health reports its
+# HSCRC all-payer rate ONLY here, with negotiated_dollar blank.
+RATE_ESTIMATED = "estimated"
 
 PAYERLESS_RATE_TYPES = {RATE_GROSS, RATE_CASH, RATE_MIN, RATE_MAX}
 

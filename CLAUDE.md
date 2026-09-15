@@ -28,7 +28,10 @@ billing_class, payer_name, plan_name, rate_type, rate_dollar, rate_percent,
 contracting_method, last_updated_on, source_file
 ```
 
-`rate_type` is one of `gross`, `discounted_cash`, `negotiated`, `min`, `max`.
+`rate_type` is one of `gross`, `discounted_cash`, `negotiated`, `estimated`,
+`min`, `max`. `estimated` was added after the first real file: Frederick Health
+reports its all-payer rate only in `estimated_amount`. Without it Frederick
+has zero payer rows.
 
 `schema.py` is the contract. `write.py` asserts its Arrow schema matches
 `ChargeRow` field-for-field, so adding a column means editing both or the
@@ -123,8 +126,10 @@ Two layouts, detected by `detect_format`:
   `parse.py`. New suffixes go in those sets, not in ad hoc branches.
 - **tall** — literal `payer_name` / `plan_name` columns, one row per payer.
   Gross, cash, min and max repeat on every payer row, so `_parse_tall` emits
-  them once per code via a `seen_hospital_wide` set. Removing that dedupe
-  multiplies the hospital-wide row count by the payer count.
+  them once per chargemaster ITEM (code + description + modifiers + setting +
+  value) via `seen_hospital_wide`. Per item, not per code: one CPT maps to
+  many items with different gross charges (Shady Grove: 15 items on 99213).
+  Removing the dedupe multiplies hospital-wide rows by the payer count.
 
 A single source row can carry several codes (`code|1`, `code|2`, …). Each
 becomes its own tidy row. `_code_pairs` handles up to nine.
@@ -164,7 +169,7 @@ forty minutes into a run.
 
 ## Testing
 
-`pytest` must pass before any commit. Fixtures live in `tests/fixtures/` and
+`pytest` must pass before any commit (37 tests). Fixtures live in `tests/fixtures/` and
 are synthetic. The wide/tall cross-check (`test_tall_and_wide_agree`) asserts
 that the same prices in two layouts produce identical tidy output; if you touch
 either parser, that test is the one that catches you.

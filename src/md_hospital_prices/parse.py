@@ -21,6 +21,7 @@ from typing import Iterator, Optional
 from .schema import (
     ChargeRow,
     RATE_CASH,
+    RATE_ESTIMATED,
     RATE_GROSS,
     RATE_MAX,
     RATE_MIN,
@@ -34,7 +35,11 @@ csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
 _DOLLAR_SUFFIXES = {"negotiated_dollar", "negotiated_amount", ""}
 _PERCENT_SUFFIXES = {"negotiated_percentage", "percent", "percentage"}
 _METHOD_SUFFIXES = {"methodology", "contracting_method"}
-_IGNORE_SUFFIXES = {"negotiated_algorithm", "estimated_amount", "additional_payer_notes"}
+_ESTIMATED_SUFFIXES = {"estimated_amount"}
+# v3.0.0 (2026) adds these per payer; real allowed-amount statistics, worth a
+# later rate_type of their own. Known and deliberately not parsed yet.
+_IGNORE_SUFFIXES = {"negotiated_algorithm", "additional_payer_notes",
+                    "median_amount", "10th_percentile", "90th_percentile", "count"}
 
 # exactly nine digits at the start, then a separator. A ten-digit NPI
 # (Luminis) must NOT match, or we would file a fake EIN.
@@ -112,7 +117,7 @@ class PayerColumn:
         self.index = index
         self.payer = payer
         self.plan = plan
-        self.kind = kind  # dollar | percent | method
+        self.kind = kind  # dollar | percent | method | estimated
 
     @property
     def key(self) -> tuple[str, str]:
@@ -161,6 +166,8 @@ def decode_wide_header(header: list[str]) -> tuple[dict[str, int], list[PayerCol
                 payer_cols.append(PayerColumn(i, payer, plan, "percent"))
             elif suffix in _METHOD_SUFFIXES:
                 payer_cols.append(PayerColumn(i, payer, plan, "method"))
+            elif suffix in _ESTIMATED_SUFFIXES:
+                payer_cols.append(PayerColumn(i, payer, plan, "estimated"))
             elif suffix in _IGNORE_SUFFIXES:
                 pass
             else:
@@ -307,16 +314,22 @@ def _parse_wide(path, header_idx, header, hospital, ein, updated) -> Iterator[Ch
 
             # payer-specific rates
             for (payer, plan), cols in grouped.items():
-                di, pi, mi = cols.get("dollar"), cols.get("percent"), cols.get("method")
+                di, pi, mi, ei = cols.get("dollar"), cols.get("percent"), cols.get("method"), cols.get("estimated")
                 dollar = _to_float(row[di]) if di is not None and di < len(row) else None
                 percent = _to_float(row[pi]) if pi is not None and pi < len(row) else None
                 method = _clean(row[mi]) if mi is not None and mi < len(row) else None
-                if dollar is None and percent is None:
-                    continue  # blank means no contract, not a free procedure
-                yield ChargeRow(code=code, code_type=ctype, payer_name=payer,
-                                plan_name=plan, rate_type=RATE_NEGOTIATED,
-                                rate_dollar=dollar, rate_percent=percent,
-                                contracting_method=method, **common)
+                est = _to_float(row[ei]) if ei is not None and ei < len(row) else None
+                if dollar is not None or percent is not None:
+                    yield ChargeRow(code=code, code_type=ctype, payer_name=payer,
+                                    plan_name=plan, rate_type=RATE_NEGOTIATED,
+                                    rate_dollar=dollar, rate_percent=percent,
+                                    contracting_method=method, **common)
+                if est is not None:
+                    yield ChargeRow(code=code, code_type=ctype, payer_name=payer,
+                                    plan_name=plan, rate_type=RATE_ESTIMATED,
+                                    rate_dollar=est, rate_percent=None,
+                                    contracting_method=method, **common)
+                # both blank means no contract with this payer, not a free procedure
 
 
 def _parse_tall(path, header_idx, header, hospital, ein, updated) -> Iterator[ChargeRow]:
@@ -333,8 +346,14 @@ def _parse_tall(path, header_idx, header, hospital, ein, updated) -> Iterator[Ch
     i_dollar = col("standard_charge|negotiated_dollar", "standard_charge|negotiated_amount")
     i_pct = col("standard_charge|negotiated_percentage", "standard_charge|percent")
     i_method = col("standard_charge|methodology", "standard_charge|contracting_method")
+    i_est = col("estimated_amount")
+    i_mod = col("modifiers")
 
-    seen_hospital_wide: set[tuple[str, str]] = set()
+    # hospital-wide rates repeat on every payer row of the same chargemaster
+    # item, so dedupe per ITEM (code + description + modifiers + setting +
+    # value), never per code: one CPT can map to many items with different
+    # gross charges (Shady Grove has 15 items on 99213).
+    seen_hospital_wide: set[tuple] = set()
 
     for row in _rows_after(path, header_idx):
         codes = _code_pairs(row, plain)
@@ -350,20 +369,21 @@ def _parse_tall(path, header_idx, header, hospital, ein, updated) -> Iterator[Ch
             source_file=path.name,
         )
 
+        item = (common["description"], _get(row, plain, "modifiers") if i_mod is not None else None,
+                common["setting"])
+
         for code, ctype in codes:
-            # in tall files the hospital-wide rates repeat on every payer row,
-            # so emit them once per code to avoid inflating the table
             for key, rate_type in (
                 ("standard_charge|gross", RATE_GROSS),
                 ("standard_charge|discounted_cash", RATE_CASH),
                 ("standard_charge|min", RATE_MIN),
                 ("standard_charge|max", RATE_MAX),
             ):
-                marker = (code + "|" + ctype, rate_type)
-                if marker in seen_hospital_wide:
-                    continue
                 amount = _to_float(_get(row, plain, key))
                 if amount is None:
+                    continue
+                marker = (code, ctype, item, rate_type, amount)
+                if marker in seen_hospital_wide:
                     continue
                 seen_hospital_wide.add(marker)
                 yield ChargeRow(code=code, code_type=ctype, payer_name=None,
@@ -378,9 +398,14 @@ def _parse_tall(path, header_idx, header, hospital, ein, updated) -> Iterator[Ch
             dollar = _to_float(row[i_dollar]) if i_dollar is not None and i_dollar < len(row) else None
             percent = _to_float(row[i_pct]) if i_pct is not None and i_pct < len(row) else None
             method = _clean(row[i_method]) if i_method is not None and i_method < len(row) else None
-            if dollar is None and percent is None:
-                continue
-            yield ChargeRow(code=code, code_type=ctype, payer_name=payer,
-                            plan_name=plan, rate_type=RATE_NEGOTIATED,
-                            rate_dollar=dollar, rate_percent=percent,
-                            contracting_method=method, **common)
+            est = _to_float(row[i_est]) if i_est is not None and i_est < len(row) else None
+            if dollar is not None or percent is not None:
+                yield ChargeRow(code=code, code_type=ctype, payer_name=payer,
+                                plan_name=plan, rate_type=RATE_NEGOTIATED,
+                                rate_dollar=dollar, rate_percent=percent,
+                                contracting_method=method, **common)
+            if est is not None:
+                yield ChargeRow(code=code, code_type=ctype, payer_name=payer,
+                                plan_name=plan, rate_type=RATE_ESTIMATED,
+                                rate_dollar=est, rate_percent=None,
+                                contracting_method=method, **common)

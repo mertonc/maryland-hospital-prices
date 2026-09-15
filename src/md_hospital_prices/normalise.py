@@ -18,6 +18,10 @@ from typing import Iterable, Optional
 
 # canonical name -> patterns that mean it
 _PAYER_PATTERNS: list[tuple[str, re.Pattern]] = [
+    # Maryland's HSCRC sets one rate for everyone, and hospitals publish it
+    # under a single pseudo-payer. Seen on Frederick and Shady Grove.
+    ("All Payers", re.compile(r"^all\s*payers?$", re.I)),
+    ("Self Pay", re.compile(r"^self[\s-]*pay$|^uninsured$", re.I)),
     ("CareFirst BlueCross BlueShield", re.compile(r"care\s*first|cfbcbs|blue\s*choice|blue\s*preferred", re.I)),
     ("Aetna", re.compile(r"\baetna\b", re.I)),
     # deliberately not a bare \bunited\b — that would swallow United Concordia

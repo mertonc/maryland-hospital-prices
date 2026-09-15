@@ -40,12 +40,21 @@ One row is one price:
 | `code`, `code_type` | CPT, HCPCS, MS-DRG, RC… a source row with several codes becomes several tidy rows |
 | `setting`, `billing_class` | inpatient / outpatient; professional / facility |
 | `payer_name`, `plan_name` | null for hospital-wide rates; payer names canonicalised |
-| `rate_type` | `gross`, `discounted_cash`, `negotiated`, `min`, `max` |
+| `rate_type` | `gross`, `discounted_cash`, `negotiated`, `estimated`, `min`, `max` |
 | `rate_dollar`, `rate_percent` | kept separate; a percent-of-charges contract is not a dollar amount |
 | `contracting_method` | fee schedule, case rate, per diem, percent of charges, capitation, other |
 | `last_updated_on`, `source_file` | provenance on every row |
 
 A blank rate means no contract with that payer, never zero.
+
+`estimated` is the hospital's own dollar estimate of the allowed amount, which
+CMS asks for when a contract is an algorithm or percentage. Frederick Health
+reports its HSCRC all-payer rate *only* there, with `negotiated_dollar` blank,
+so it is kept as its own rate type rather than folded into `negotiated`.
+
+The grain holds per chargemaster item. One CPT code can appear on many items
+(Shady Grove lists 15 items on 99213); `description` tells them apart, and
+analysis aggregates by code.
 
 ```
 data/seeds.csv ──discover──▶ data/sources.csv ──fetch──▶ data/raw/*.csv|zip
@@ -77,7 +86,7 @@ Not yet.
 ```bash
 python -m venv .venv && source .venv/Scripts/activate   # Git Bash on Windows
 pip install -e ".[dev]"
-pytest                                                    # 34 tests
+pytest                                                    # 37 tests
 
 python -m md_hospital_prices fetch          # 38 files; resumable; hours on home wifi
 python -m md_hospital_prices profile        # row counts per file via DuckDB
