@@ -292,9 +292,13 @@ def cmd_sample(args) -> int:
         print(f"No files in {RAW}. Run `fetch` first.")
         return 1
 
+    from itertools import islice
+
     def all_rows():
+        # stop reading each file once we have enough; otherwise this would
+        # re-parse 5 GB to keep 2,000 rows per hospital
         for path in files:
-            for row in parse_file(path):
+            for row in islice(parse_file(path), args.per_hospital):
                 yield normalise_row(row)
 
     n = write_csv(take_sample(all_rows(), args.per_hospital), SAMPLE / "charges_sample.csv")
