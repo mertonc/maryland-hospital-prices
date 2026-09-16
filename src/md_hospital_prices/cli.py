@@ -6,6 +6,7 @@
     python -m md_hospital_prices profile             row counts per file via DuckDB
     python -m md_hospital_prices parse               data/raw/ -> data/interim/*.parquet
     python -m md_hospital_prices report              one line per parsed hospital
+    python -m md_hospital_prices query "<sql>"       SQL against the parquet; table is `charges`
     python -m md_hospital_prices sample              small committable CSV slice
 """
 
@@ -223,6 +224,68 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_query(args) -> int:
+    """Run SQL against the parsed parquet. The table is called `charges`.
+
+        python -m md_hospital_prices query "select count(*) from charges"
+        python -m md_hospital_prices query -f notebooks/q1.sql
+        python -m md_hospital_prices query            # interactive prompt
+    """
+    try:
+        import duckdb
+    except ImportError:
+        print("pip install duckdb")
+        return 1
+    if not list(INTERIM.glob("*.parquet")):
+        print(f"No parquet in {INTERIM}. Run `parse` first.")
+        return 1
+    con = duckdb.connect()
+    glob = str(INTERIM / "*.parquet").replace("\\", "/")
+    con.execute(f"create view charges as select * from read_parquet('{glob}')")
+
+    def run(sql: str) -> None:
+        sql = sql.strip().rstrip(";")
+        if not sql:
+            return
+        try:
+            rel = con.sql(sql)
+            if rel is None:
+                print("ok")
+                return
+            if args.csv:
+                import csv as _csv
+                w = _csv.writer(sys.stdout)
+                w.writerow(rel.columns)
+                for row in rel.fetchall():
+                    w.writerow(row)
+            else:
+                rel.limit(args.limit).show(max_width=200, max_rows=args.limit)
+        except Exception as exc:
+            print(f"error: {exc}")
+
+    if args.file:
+        run(Path(args.file).read_text())
+    elif args.sql:
+        run(" ".join(args.sql))
+    else:
+        print("SQL on `charges`. Blank line runs; Ctrl-D or `exit` quits.")
+        buf: list[str] = []
+        while True:
+            try:
+                line = input("charges> " if not buf else "     ...> ")
+            except EOFError:
+                break
+            if line.strip().lower() in {"exit", "quit"}:
+                break
+            if not line.strip():
+                run("\n".join(buf)); buf = []
+            else:
+                buf.append(line)
+        if buf:
+            run("\n".join(buf))
+    return 0
+
+
 def cmd_sample(args) -> int:
     files = _raw_files()
     if not files:
@@ -267,6 +330,13 @@ def main(argv=None) -> int:
 
     r = sub.add_parser("report", help="one line per parsed hospital")
     r.set_defaults(func=cmd_report)
+
+    q = sub.add_parser("query", help="run SQL against the parsed parquet (table: charges)")
+    q.add_argument("sql", nargs="*", help="SQL text; omit for an interactive prompt")
+    q.add_argument("-f", "--file", help="read SQL from a file")
+    q.add_argument("--limit", type=int, default=50, help="rows to display (default 50)")
+    q.add_argument("--csv", action="store_true", help="print CSV instead of a table")
+    q.set_defaults(func=cmd_query)
 
     s = sub.add_parser("sample", help="write a small committable CSV slice")
     s.add_argument("--per-hospital", type=int, default=2000)
