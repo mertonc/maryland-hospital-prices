@@ -1,0 +1,13 @@
+system,domain,notes
+Frederick Health,www.frederickhealth.org,
+Johns Hopkins Medicine,www.hopkinsmedicine.org,lists 6 locations; All Children's (FL) and Sibley (DC) excluded in sources.csv
+University of Maryland Medical System,www.umms.org,returns 403 to scripts; 17 locations captured by reading cms-hpt.txt in a browser (Sept 2026)
+MedStar Health,www.medstarhealth.org,lists 10 hospitals plus 69 physical therapy sites; DC hospitals excluded
+LifeBridge Health,www.lifebridgehealth.org,5 locations
+GBMC HealthCare,www.gbmc.org,
+Mercy Health Services,www.mdmercy.com,MRF served through a .ashx handler; format sniffed after download
+Adventist HealthCare,www.adventisthealthcare.com,5 locations incl. a freestanding ED and a rehab hospital
+Holy Cross Health,www.holycrosshealth.org,key spelled mfr-url; files are .zip hosted on trinity-health.org
+Luminis Health,www.luminishealth.org,3 locations; McNew is a psychiatric hospital
+Meritus Health,www.meritushealth.com,
+TidalHealth,www.tidalhealth.org,3 locations; Nanticoke is in Delaware

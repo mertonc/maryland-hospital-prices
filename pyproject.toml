@@ -1,0 +1,20 @@
+[project]
+name = "md-hospital-prices"
+version = "0.1.0"
+description = "Parsing and modeling Maryland hospital price transparency files."
+requires-python = ">=3.10"
+dependencies = ["pyarrow>=14", "requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "duckdb>=1.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

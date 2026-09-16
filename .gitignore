@@ -31,3 +31,6 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# test fixture zips are tiny and synthetic; the *.zip rule above must not hide them
+!tests/fixtures/*.zip
